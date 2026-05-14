@@ -23,7 +23,6 @@ def check():
         response = requests.get(URL, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         page_text = soup.get_text().lower()
-
         if "deelnemen" in page_text and not email_sent:
             send_email()
             email_sent = True
@@ -39,13 +38,8 @@ def send_email():
     msg = MIMEMultipart()
     msg["From"] = EMAIL_FROM
     msg["To"] = ", ".join(EMAIL_TO)
-    msg["Subject"] = "🏠 Campus Groningen - Bezichtiging beschikbaar!"
-    body = f"""De knop 'Deelnemen' is verschenen op de woningpagina!
-
-Ga nu direct naar:
-{URL}
-
-Wees er snel bij!"""
+    msg["Subject"] = "Campus Groningen - Bezichtiging beschikbaar!"
+    body = "De knop Deelnemen is verschenen! Ga naar: " + URL
     msg.attach(MIMEText(body, "plain"))
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.starttls()
@@ -55,10 +49,12 @@ Wees er snel bij!"""
 @app.route("/")
 def home():
     return "Campus monitor actief!", 200
+
 @app.route("/test")
 def test():
     send_email()
     return "Testmail verstuurd!", 200
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
