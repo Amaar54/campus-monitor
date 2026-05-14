@@ -7,7 +7,7 @@ import httpx
 app = Flask(__name__)
 
 URL = "https://www.campusgroningen.com/woning/friesestraatweg-groningen-2168"
-EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
+EMAIL_TO = ["amarkakehking@gmail.com"]
 EMAIL_FROM = "onboarding@resend.dev"
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 
