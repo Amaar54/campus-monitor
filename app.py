@@ -2,14 +2,12 @@ from flask import Flask
 import requests
 from bs4 import BeautifulSoup
 import os
-import httpx
 
 app = Flask(__name__)
 
 URL = "https://www.campusgroningen.com/woning/friesestraatweg-groningen-2168"
-EMAIL_TO = ["amarkakehking@gmail.com"]
-EMAIL_FROM = "onboarding@resend.dev"
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY")
 
 email_sent = False
 
@@ -33,14 +31,17 @@ def check():
         return f"Error: {e}", 500
 
 def send_email():
-    httpx.post(
-        "https://api.resend.com/emails",
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+    requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": BREVO_API_KEY,
+            "Content-Type": "application/json"
+        },
         json={
-            "from": EMAIL_FROM,
-            "to": EMAIL_TO,
+            "sender": {"name": "Campus Monitor", "email": "kakehamar@gmail.com"},
+            "to": [{"email": e} for e in EMAIL_TO],
             "subject": "Campus Groningen - Bezichtiging beschikbaar!",
-            "text": f"De knop Deelnemen is verschenen! Ga naar: {URL}"
+            "textContent": f"De knop Deelnemen is verschenen! Ga naar: {URL}"
         }
     )
 
