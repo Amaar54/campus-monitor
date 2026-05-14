@@ -1,17 +1,15 @@
 from flask import Flask
 import requests
 from bs4 import BeautifulSoup
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import os
+import httpx
 
 app = Flask(__name__)
 
 URL = "https://www.campusgroningen.com/woning/friesestraatweg-groningen-2168"
 EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
-EMAIL_FROM = os.environ.get("EMAIL_FROM")
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
+EMAIL_FROM = "onboarding@resend.dev"
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 
 email_sent = False
 
@@ -35,16 +33,16 @@ def check():
         return f"Error: {e}", 500
 
 def send_email():
-    msg = MIMEMultipart()
-    msg["From"] = EMAIL_FROM
-    msg["To"] = ", ".join(EMAIL_TO)
-    msg["Subject"] = "Campus Groningen - Bezichtiging beschikbaar!"
-    body = "De knop Deelnemen is verschenen! Ga naar: " + URL
-    msg.attach(MIMEText(body, "plain"))
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(EMAIL_FROM, EMAIL_PASSWORD)
-        server.send_message(msg)
+    httpx.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+        json={
+            "from": EMAIL_FROM,
+            "to": EMAIL_TO,
+            "subject": "Campus Groningen - Bezichtiging beschikbaar!",
+            "text": f"De knop Deelnemen is verschenen! Ga naar: {URL}"
+        }
+    )
 
 @app.route("/")
 def home():
