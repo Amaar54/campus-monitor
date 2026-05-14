@@ -47,9 +47,10 @@ Ga nu direct naar:
 
 Wees er snel bij!"""
     msg.attach(MIMEText(body, "plain"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_FROM, EMAIL_PASSWORD)
-        server.send_message(msg)
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    server.starttls()
+    server.login(EMAIL_FROM, EMAIL_PASSWORD)
+    server.send_message(msg)
 
 @app.route("/")
 def home():
