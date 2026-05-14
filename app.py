@@ -9,7 +9,7 @@ import os
 app = Flask(__name__)
 
 URL = "https://www.campusgroningen.com/woning/friesestraatweg-groningen-2168"
-EMAIL_TO = "kakehamar@gmail.com"
+EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
 EMAIL_FROM = os.environ.get("EMAIL_FROM")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
 
@@ -38,7 +38,7 @@ def check():
 def send_email():
     msg = MIMEMultipart()
     msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
+    msg["To"] = ", ".join(EMAIL_TO)
     msg["Subject"] = "🏠 Campus Groningen - Bezichtiging beschikbaar!"
     body = f"""De knop 'Deelnemen' is verschenen op de woningpagina!
 
