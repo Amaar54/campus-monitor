@@ -2,27 +2,36 @@ from flask import Flask
 import requests
 from bs4 import BeautifulSoup
 import os
+import json
  
 app = Flask(__name__)
  
 AANBOD_URL = "https://www.campusgroningen.com/huren-groningen"
 EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY")
+DATA_FILE = "bekende_woningen.json"
  
-# Onthoudt bekende woningen en woningen waar deelnemen al gemeld is
-bekende_woningen = set()
-deelnemen_gemeld = set()
+def laad_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+            return set(data.get("bekende", [])), set(data.get("deelnemen", []))
+    return set(), set()
+ 
+def sla_op(bekende, deelnemen):
+    with open(DATA_FILE, "w") as f:
+        json.dump({"bekende": list(bekende), "deelnemen": list(deelnemen)}, f)
  
 @app.route("/check")
 def check():
+    bekende_woningen, deelnemen_gemeld = laad_data()
+ 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
  
-        # Stap 1: haal de aanbodpagina op
         response = requests.get(AANBOD_URL, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
  
-        # Stap 2: zoek alle woninglinks
         woning_links = set()
         for a in soup.find_all("a", href=True):
             href = a["href"]
@@ -46,18 +55,18 @@ def check():
                 naam_tekst = naam.get_text(strip=True) if naam else link
                 woning_tekst = woning_soup.get_text().lower()
  
-                # Nieuwe woning op aanbodpagina
                 if link not in bekende_woningen:
                     bekende_woningen.add(link)
                     nieuwe_woningen.append({"naam": naam_tekst, "link": link})
  
-                # Deelnemen knop verschenen
                 if "deelnemen" in woning_tekst and link not in deelnemen_gemeld:
                     deelnemen_gemeld.add(link)
                     deelnemen_woningen.append({"naam": naam_tekst, "link": link})
  
             except Exception:
                 continue
+ 
+        sla_op(bekende_woningen, deelnemen_gemeld)
  
         resultaat = []
  
@@ -119,4 +128,5 @@ def test():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+ 
  
