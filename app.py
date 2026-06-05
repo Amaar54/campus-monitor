@@ -1,3 +1,6 @@
+import subprocess
+subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+
 from flask import Flask
 import os
 import json
@@ -5,8 +8,6 @@ import asyncio
 from playwright.async_api import async_playwright
 import requests
 import re
-import subprocess
-subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
 
 app = Flask(__name__)
 
@@ -68,9 +69,16 @@ async def check_and_act():
         # Inloggen
         await page.goto(LOGIN_URL)
         await page.wait_for_load_state("networkidle")
-        await page.fill('input[type="email"], input[name="email"], input[name="username"]', CAMPUS_EMAIL)
-        await page.fill('input[type="password"]', CAMPUS_PASSWORD)
-        await page.click('button[type="submit"], input[type="submit"]')
+
+        email_input = await page.query_selector('input[type="email"]')
+        if not email_input:
+            email_input = await page.query_selector('input[name="email"]')
+        if not email_input:
+            email_input = await page.query_selector('input[name="username"]')
+        await email_input.fill(CAMPUS_EMAIL)
+
+        await page.locator('input[type="password"]').fill(CAMPUS_PASSWORD)
+        await page.locator('button[type="submit"], input[type="submit"]').first.click()
         await page.wait_for_load_state("networkidle")
 
         # Listings ophalen
