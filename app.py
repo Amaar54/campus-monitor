@@ -12,7 +12,6 @@ import re
 app = Flask(__name__)
 
 LISTINGS_URL = "https://www.campusgroningen.com/huren-groningen"
-LOGIN_URL = "https://www.campusgroningen.com/login"
 EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY")
 CAMPUS_EMAIL = os.environ.get("CAMPUS_EMAIL")
@@ -66,20 +65,20 @@ async def check_and_act():
         context = await browser.new_context()
         page = await context.new_page()
 
-        # Inloggen
-        await page.goto(LOGIN_URL)
+        # Ga naar hoofdpagina en open login modal
+        await page.goto("https://www.campusgroningen.com")
         await page.wait_for_load_state("networkidle")
 
-        email_input = await page.query_selector('input[type="email"]')
-        if not email_input:
-            email_input = await page.query_selector('input[name="email"]')
-        if not email_input:
-            email_input = await page.query_selector('input[name="username"]')
-        await email_input.fill(CAMPUS_EMAIL)
+        # Klik op INLOGGEN knop in navbar
+        await page.locator("text=INLOGGEN").first.click()
+        await page.wait_for_timeout(1000)
 
+        # Vul login modal in
+        await page.locator('input[type="email"]').fill(CAMPUS_EMAIL)
         await page.locator('input[type="password"]').fill(CAMPUS_PASSWORD)
-        await page.locator('button[type="submit"], input[type="submit"]').first.click()
+        await page.locator("text=INLOGGEN").last.click()
         await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(2000)
 
         # Listings ophalen
         await page.goto(LISTINGS_URL)
@@ -133,14 +132,18 @@ async def check_and_act():
                     await deelnemen_btn.click()
                     await woning_page.wait_for_load_state("networkidle")
 
-                    bevestig = await woning_page.query_selector("text=Bevestig, text=Ja, text=Bevestigen")
+                    bevestig = await woning_page.query_selector("text=Bevestigen")
+                    if not bevestig:
+                        bevestig = await woning_page.query_selector("text=Bevestig")
+                    if not bevestig:
+                        bevestig = await woning_page.query_selector("text=Ja")
                     if bevestig:
                         await bevestig.click()
                         await woning_page.wait_for_load_state("networkidle")
 
                     gemeld.add(url)
                     m2_info = f" ({m2}m²)" if m2 else ""
-                    prijs_info = f" €{prijs}" if prijs else ""
+                    prijs_info = f" €{int(prijs)}" if prijs else ""
                     send_email(
                         subject=f"✅ Automatisch deelgenomen!{m2_info}{prijs_info}",
                         body=f"De monitor heeft automatisch deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account op Campus Groningen."
