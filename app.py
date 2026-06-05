@@ -5,6 +5,8 @@ import asyncio
 from playwright.async_api import async_playwright
 import requests
 import re
+import subprocess
+subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
 
 app = Flask(__name__)
 
