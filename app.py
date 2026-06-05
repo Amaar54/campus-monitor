@@ -16,6 +16,7 @@ CAMPUS_EMAIL = os.environ.get("CAMPUS_EMAIL")
 CAMPUS_PASSWORD = os.environ.get("CAMPUS_PASSWORD")
 DATA_FILE = "bekende_woningen.json"
 MIN_M2 = 35
+MAX_PRIJS = 1350
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -44,6 +45,13 @@ def extract_m2(text):
     match = re.search(r'(\d+)\s*m[²2]', text, re.IGNORECASE)
     if match:
         return int(match.group(1))
+    return None
+
+def extract_prijs(text):
+    match = re.search(r'€\s*(\d+[\.,]?\d*)', text)
+    if match:
+        prijs_str = match.group(1).replace('.', '').replace(',', '.')
+        return float(prijs_str)
     return None
 
 async def check_and_act():
@@ -84,7 +92,7 @@ async def check_and_act():
             bekende.update(nieuwe)
             resultaten.append(f"{len(nieuwe)} nieuwe woning(en) gevonden.")
 
-        # Elke woning checken op Deelnemen + m2
+        # Elke woning checken
         for url in woningen:
             if url in gemeld:
                 continue
@@ -98,7 +106,14 @@ async def check_and_act():
             m2 = extract_m2(tekst)
             if m2 is not None and m2 < MIN_M2:
                 await woning_page.close()
-                resultaten.append(f"Overgeslagen ({m2}m²): {url}")
+                resultaten.append(f"Overgeslagen te klein ({m2}m²): {url}")
+                continue
+
+            # Check prijs
+            prijs = extract_prijs(tekst)
+            if prijs is not None and prijs > MAX_PRIJS:
+                await woning_page.close()
+                resultaten.append(f"Overgeslagen te duur (€{prijs}): {url}")
                 continue
 
             # Check op Deelnemen knop
@@ -115,9 +130,10 @@ async def check_and_act():
 
                     gemeld.add(url)
                     m2_info = f" ({m2}m²)" if m2 else ""
+                    prijs_info = f" €{prijs}" if prijs else ""
                     send_email(
-                        subject=f"✅ Automatisch deelgenomen!{m2_info}",
-                        body=f"De monitor heeft automatisch deelgenomen aan:\n{url}{m2_info}\n\nControleer je account op Campus Groningen."
+                        subject=f"✅ Automatisch deelgenomen!{m2_info}{prijs_info}",
+                        body=f"De monitor heeft automatisch deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account op Campus Groningen."
                     )
                     resultaten.append(f"Deelgenomen: {url}")
                 except Exception as e:
