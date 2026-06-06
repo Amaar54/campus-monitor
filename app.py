@@ -1,5 +1,8 @@
 import subprocess
-subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+try:
+    subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+except Exception as e:
+    print(f"Playwright install fout: {e}")
 
 from flask import Flask
 import os
