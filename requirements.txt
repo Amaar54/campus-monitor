@@ -1,5 +1,4 @@
 flask
-requests
+curl-cffi
 beautifulsoup4
 gunicorn
-playwright
