@@ -49,6 +49,16 @@ def extract_prijs(text):
     match = re.search(r'€\s*(\d[\d\.]*)', text)
     return float(match.group(1).replace('.', '')) if match else None
 
+def vind_deelnemen_form(soup):
+    """Zoekt naar een echte Deelnemen knop in een formulier."""
+    for form in soup.find_all("form"):
+        knoppen = form.find_all(["button", "input"])
+        for knop in knoppen:
+            tekst = knop.get_text(strip=True).lower() or knop.get("value", "").lower()
+            if "deelnemen" in tekst:
+                return form
+    return None
+
 def maak_sessie():
     session = Session(impersonate="chrome120")
     resp = session.get(HOME_URL, timeout=15)
@@ -97,29 +107,33 @@ def check():
 
             m2 = extract_m2(body_tekst)
             if m2 is not None and m2 < MIN_M2:
-                resultaten.append(f"Te klein ({m2}m²): {url}")
+                resultaten.append(f"Te klein ({m2}m2): {url}")
                 continue
 
             prijs = extract_prijs(body_tekst)
             if prijs is not None and prijs > MAX_PRIJS:
-                resultaten.append(f"Te duur (€{int(prijs)}): {url}")
+                resultaten.append(f"Te duur (E{int(prijs)}): {url}")
                 continue
 
-            if "deelnemen" in body_tekst.lower():
-                form = soup_w.find("form")
-                if form:
-                    action = form.get("action", url)
-                    form_data = {inp.get("name"): inp.get("value", "") for inp in form.find_all("input") if inp.get("name")}
-                    full_action = action if action.startswith("http") else f"{HOME_URL}{action}"
-                    session.post(full_action, data=form_data, timeout=15)
-                    gemeld.add(url)
-                    m2_info = f" ({m2}m²)" if m2 else ""
-                    prijs_info = f" €{int(prijs)}" if prijs else ""
-                    send_email(
-                        subject=f"✅ Deelgenomen!{m2_info}{prijs_info}",
-                        body=f"Deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account."
-                    )
-                    resultaten.append(f"Deelgenomen: {url}")
+            # Zoek naar echte Deelnemen knop in formulier
+            deelnemen_form = vind_deelnemen_form(soup_w)
+            if deelnemen_form:
+                action = deelnemen_form.get("action", url)
+                form_data = {
+                    inp.get("name"): inp.get("value", "")
+                    for inp in deelnemen_form.find_all("input")
+                    if inp.get("name")
+                }
+                full_action = action if action.startswith("http") else f"{HOME_URL}{action}"
+                session.post(full_action, data=form_data, timeout=15)
+                gemeld.add(url)
+                m2_info = f" ({m2}m2)" if m2 else ""
+                prijs_info = f" E{int(prijs)}" if prijs else ""
+                send_email(
+                    subject=f"Deelgenomen!{m2_info}{prijs_info}",
+                    body=f"Deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account."
+                )
+                resultaten.append(f"Deelgenomen: {url}")
 
         save_data(bekende, gemeld)
         return "\n".join(resultaten) if resultaten else "Niets nieuws.", 200, {'Content-Type': 'text/plain'}
