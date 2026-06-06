@@ -1,14 +1,15 @@
 from flask import Flask
 import os
 import json
-import asyncio
-from playwright.async_api import async_playwright
+from curl_cffi.requests import Session
+from bs4 import BeautifulSoup
 import requests
 import re
 
 app = Flask(__name__)
 
 LISTINGS_URL = "https://www.campusgroningen.com/huren-groningen"
+HOME_URL = "https://www.campusgroningen.com"
 EMAIL_TO = ["kakehamar@gmail.com", "liewesjulia@gmail.com"]
 BREVO_API_KEY = os.environ.get("BREVO_API_KEY")
 CAMPUS_EMAIL = os.environ.get("CAMPUS_EMAIL")
@@ -48,40 +49,37 @@ def extract_prijs(text):
     match = re.search(r'€\s*(\d[\d\.]*)', text)
     return float(match.group(1).replace('.', '')) if match else None
 
-async def check_and_act():
-    bekende, gemeld = load_data()
-    resultaten = []
+def maak_sessie():
+    session = Session(impersonate="chrome120")
+    resp = session.get(HOME_URL, timeout=15)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    csrf = None
+    for inp in soup.find_all('input'):
+        if inp.get('name') in ['_token', 'csrf_token', 'csrfmiddlewaretoken']:
+            csrf = inp.get('value')
+            break
+    login_data = {"email": CAMPUS_EMAIL, "password": CAMPUS_PASSWORD}
+    if csrf:
+        login_data["_token"] = csrf
+    session.post(f"{HOME_URL}/login", data=login_data, timeout=15)
+    return session
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = await browser.new_context()
-        page = await context.new_page()
+@app.route("/check")
+def check():
+    try:
+        bekende, gemeld = load_data()
+        resultaten = []
+        session = maak_sessie()
 
-        # Open hoofdpagina en login modal
-        await page.goto("https://www.campusgroningen.com")
-        await page.wait_for_load_state("networkidle")
-        await page.locator("text=INLOGGEN").first.click()
-        await page.wait_for_timeout(1000)
+        resp = session.get(LISTINGS_URL, timeout=15)
+        resultaten.append(f"Listings status: {resp.status_code}")
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Inloggen
-        await page.locator('input[type="email"]').fill(CAMPUS_EMAIL)
-        await page.locator('input[type="password"]').fill(CAMPUS_PASSWORD)
-        await page.locator("text=INLOGGEN").last.click()
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(2000)
-
-        # Listings ophalen
-        await page.goto(LISTINGS_URL)
-        await page.wait_for_load_state("networkidle")
-        content = await page.content()
-
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(content, "html.parser")
         woningen = set()
         for link in soup.find_all("a", href=True):
             href = link["href"]
             if "/woning/" in href:
-                full_url = "https://www.campusgroningen.com" + href if href.startswith("/") else href
+                full_url = HOME_URL + href if href.startswith("/") else href
                 woningen.add(full_url)
 
         resultaten.append(f"Woningen gevonden: {len(woningen)}")
@@ -93,35 +91,27 @@ async def check_and_act():
         for url in woningen:
             if url in gemeld:
                 continue
+            woning_resp = session.get(url, timeout=15)
+            soup_w = BeautifulSoup(woning_resp.text, "html.parser")
+            body_tekst = soup_w.get_text()
 
-            woning_page = await context.new_page()
-            await woning_page.goto(url)
-            await woning_page.wait_for_load_state("networkidle")
-            tekst = await woning_page.inner_text("body")
-
-            m2 = extract_m2(tekst)
+            m2 = extract_m2(body_tekst)
             if m2 is not None and m2 < MIN_M2:
-                await woning_page.close()
                 resultaten.append(f"Te klein ({m2}m²): {url}")
                 continue
 
-            prijs = extract_prijs(tekst)
+            prijs = extract_prijs(body_tekst)
             if prijs is not None and prijs > MAX_PRIJS:
-                await woning_page.close()
                 resultaten.append(f"Te duur (€{int(prijs)}): {url}")
                 continue
 
-            deelnemen_btn = await woning_page.query_selector("text=Deelnemen")
-            if deelnemen_btn:
-                try:
-                    await deelnemen_btn.click()
-                    await woning_page.wait_for_load_state("networkidle")
-                    for tekst_knop in ["Bevestigen", "Bevestig", "Ja"]:
-                        bevestig = await woning_page.query_selector(f"text={tekst_knop}")
-                        if bevestig:
-                            await bevestig.click()
-                            await woning_page.wait_for_load_state("networkidle")
-                            break
+            if "deelnemen" in body_tekst.lower():
+                form = soup_w.find("form")
+                if form:
+                    action = form.get("action", url)
+                    form_data = {inp.get("name"): inp.get("value", "") for inp in form.find_all("input") if inp.get("name")}
+                    full_action = action if action.startswith("http") else f"{HOME_URL}{action}"
+                    session.post(full_action, data=form_data, timeout=15)
                     gemeld.add(url)
                     m2_info = f" ({m2}m²)" if m2 else ""
                     prijs_info = f" €{int(prijs)}" if prijs else ""
@@ -130,20 +120,8 @@ async def check_and_act():
                         body=f"Deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account."
                     )
                     resultaten.append(f"Deelgenomen: {url}")
-                except Exception as e:
-                    resultaten.append(f"Fout deelnemen: {e}")
-
-            await woning_page.close()
 
         save_data(bekende, gemeld)
-        await browser.close()
-
-    return resultaten
-
-@app.route("/check")
-def check():
-    try:
-        resultaten = asyncio.run(check_and_act())
         return "\n".join(resultaten) if resultaten else "Niets nieuws.", 200, {'Content-Type': 'text/plain'}
     except Exception as e:
         return f"Error: {e}", 500
