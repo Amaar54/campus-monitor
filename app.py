@@ -18,8 +18,16 @@ MIN_M2 = 35
 MAX_PRIJS = 1350
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "nl-NL,nl;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
 
 def load_data():
@@ -68,28 +76,17 @@ def maak_sessie():
         login_data["_token"] = csrf
     for endpoint in ["/login", "/inloggen", "/api/login"]:
         try:
-            session.post(f"https://www.campusgroningen.com{endpoint}", data=login_data, timeout=15, allow_redirects=True)
+            r = session.post(
+                f"https://www.campusgroningen.com{endpoint}",
+                data=login_data,
+                timeout=15,
+                allow_redirects=True
+            )
+            if r.status_code == 200:
+                break
         except:
             continue
     return session
-
-@app.route("/debug")
-def debug():
-    output = []
-    output.append(f"CAMPUS_EMAIL: {CAMPUS_EMAIL}")
-    output.append(f"CAMPUS_PASSWORD: {'SET' if CAMPUS_PASSWORD else 'LEEG'}")
-    output.append(f"BREVO: {'SET' if BREVO_API_KEY else 'LEEG'}")
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    resp = session.get(HOME_URL, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    forms = soup.find_all("form")
-    output.append(f"Homepage status: {resp.status_code}")
-    output.append(f"Aantal forms: {len(forms)}")
-    for i, form in enumerate(forms):
-        inputs = [(inp.get('name'), inp.get('type')) for inp in form.find_all('input')]
-        output.append(f"Form {i}: action={form.get('action')}, inputs={inputs}")
-    return "\n".join(output), 200, {'Content-Type': 'text/plain'}
 
 @app.route("/check")
 def check():
@@ -99,6 +96,7 @@ def check():
         session = maak_sessie()
 
         resp = session.get(LISTINGS_URL, timeout=15)
+        resultaten.append(f"Listings status: {resp.status_code}")
         soup = BeautifulSoup(resp.text, "html.parser")
 
         woningen = set()
