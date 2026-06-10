@@ -1,9 +1,11 @@
+
 from flask import Flask
 import os
 import json
 import requests
 from bs4 import BeautifulSoup
 import re
+import time
  
 app = Flask(__name__)
  
@@ -128,6 +130,7 @@ def check():
  
         for url in te_checken:
             try:
+                time.sleep(1)
                 woning_resp = session.get(url, timeout=10)
                 soup_w = BeautifulSoup(woning_resp.text, "html.parser")
                 body_tekst = soup_w.get_text()
