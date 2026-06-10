@@ -62,9 +62,10 @@ def vind_deelnemen_form(soup):
                 return form
     return None
  
-def maak_sessie():
-    session = requests.Session()
-    session.headers.update(HEADERS)
+def login_en_klik(url, form_action, form_data):
+    """Alleen aangeroepen als Deelnemen form gevonden is. Logt in via curl_cffi en klikt."""
+    from curl_cffi.requests import Session as CurlSession
+    session = CurlSession(impersonate="chrome120")
     try:
         resp = session.get(HOME_URL, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -77,16 +78,34 @@ def maak_sessie():
         if csrf:
             login_data["_token"] = csrf
         session.post(f"{HOME_URL}/login", data=login_data, timeout=10)
+ 
+        # Haal woningpagina opnieuw op als ingelogde gebruiker
+        woning_resp = session.get(url, timeout=10)
+        soup_w = BeautifulSoup(woning_resp.text, "html.parser")
+        deelnemen_form = vind_deelnemen_form(soup_w)
+        if deelnemen_form:
+            action = deelnemen_form.get("action", url)
+            post_data = {
+                inp.get("name"): inp.get("value", "")
+                for inp in deelnemen_form.find_all("input")
+                if inp.get("name")
+            }
+            full_action = action if action.startswith("http") else f"{HOME_URL}{action}"
+            session.post(full_action, data=post_data, timeout=10)
+            return True
     except Exception as e:
-        print(f"Login fout: {e}")
-    return session
+        print(f"Login/klik fout: {e}")
+    return False
  
 @app.route("/check")
 def check():
     try:
         bekende, gemeld = load_data()
         resultaten = []
-        session = maak_sessie()
+ 
+        # Stap 1: lichte requests sessie voor scrapen
+        session = requests.Session()
+        session.headers.update(HEADERS)
  
         resp = session.get(LISTINGS_URL, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -106,7 +125,6 @@ def check():
             resultaten.append(f"{len(nieuwe)} nieuwe woning(en) gevonden.")
  
         te_checken = woningen - gemeld
-        resultaten.append(f"Te checken: {len(te_checken)}")
  
         for url in te_checken:
             try:
@@ -116,16 +134,16 @@ def check():
  
                 m2 = extract_m2(body_tekst)
                 if m2 is not None and m2 < MIN_M2:
-                    resultaten.append(f"Te klein ({m2}m2): {url}")
                     continue
  
                 prijs = extract_prijs(body_tekst)
                 if prijs is not None and prijs > MAX_PRIJS:
-                    resultaten.append(f"Te duur (€{int(prijs)}): {url}")
                     continue
  
+                # Stap 2: check of Deelnemen form zichtbaar is (zonder login)
                 deelnemen_form = vind_deelnemen_form(soup_w)
                 if deelnemen_form:
+                    # Stap 3: alleen nu curl_cffi inzetten voor login + klik
                     action = deelnemen_form.get("action", url)
                     form_data = {
                         inp.get("name"): inp.get("value", "")
@@ -133,22 +151,23 @@ def check():
                         if inp.get("name")
                     }
                     full_action = action if action.startswith("http") else f"{HOME_URL}{action}"
-                    session.post(full_action, data=form_data, timeout=10)
+                    gelukt = login_en_klik(url, full_action, form_data)
                     gemeld.add(url)
                     m2_info = f" ({m2}m2)" if m2 else ""
                     prijs_info = f" €{int(prijs)}" if prijs else ""
+                    status = "✅ Deelgenomen!" if gelukt else "⚠️ Deelnemen gevonden maar klik mislukt"
                     send_email(
-                        subject=f"✅ Deelgenomen!{m2_info}{prijs_info}",
-                        body=f"Deelgenomen aan:\n{url}\n{m2_info}{prijs_info}\n\nControleer je account."
+                        subject=f"{status}{m2_info}{prijs_info}",
+                        body=f"{status}\n{url}\n{m2_info}{prijs_info}\n\nControleer je account."
                     )
-                    resultaten.append(f"Deelgenomen: {url}")
+                    resultaten.append(f"{status}: {url}")
  
             except Exception as e:
                 resultaten.append(f"Fout bij {url}: {e}")
                 continue
  
         save_data(bekende, gemeld)
-        return "\n".join(resultaten), 200, {'Content-Type': 'text/plain'}
+        return "\n".join(resultaten) if resultaten else "Niets nieuws.", 200, {'Content-Type': 'text/plain'}
  
     except Exception as e:
         send_email("⚠️ Monitor crash!", f"Check gefaald: {str(e)}")
@@ -162,14 +181,6 @@ def home():
 def test():
     send_email("Testmail Campus Monitor", "De monitor werkt nog steeds!")
     return "Testmail verstuurd!", 200
- 
-@app.route("/testlogin")
-def testlogin():
-    session = maak_sessie()
-    resp = session.get("https://www.campusgroningen.com/mijn-account", timeout=10)
-    if "inloggen" in resp.text.lower() or "login" in resp.url:
-        return "Login MISLUKT - niet ingelogd", 200
-    return "Login GELUKT", 200
  
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
