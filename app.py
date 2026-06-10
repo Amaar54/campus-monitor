@@ -1,10 +1,8 @@
-
 from flask import Flask
 import os
 import json
-from curl_cffi.requests import Session
-from bs4 import BeautifulSoup
 import requests
+from bs4 import BeautifulSoup
 import re
  
 app = Flask(__name__)
@@ -18,6 +16,8 @@ CAMPUS_PASSWORD = os.environ.get("CAMPUS_PASSWORD")
 DATA_FILE = "bekende_woningen.json"
 MIN_M2 = 35
 MAX_PRIJS = 1350
+ 
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"}
  
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -56,26 +56,29 @@ def extract_prijs(text):
  
 def vind_deelnemen_form(soup):
     for form in soup.find_all("form"):
-        knoppen = form.find_all(["button", "input"])
-        for knop in knoppen:
+        for knop in form.find_all(["button", "input"]):
             tekst = knop.get_text(strip=True).lower() or knop.get("value", "").lower()
             if "deelnemen" in tekst:
                 return form
     return None
  
 def maak_sessie():
-    session = Session(impersonate="chrome120")
-    resp = session.get(HOME_URL, timeout=10)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    csrf = None
-    for inp in soup.find_all('input'):
-        if inp.get('name') in ['_token', 'csrf_token', 'csrfmiddlewaretoken']:
-            csrf = inp.get('value')
-            break
-    login_data = {"email": CAMPUS_EMAIL, "password": CAMPUS_PASSWORD}
-    if csrf:
-        login_data["_token"] = csrf
-    session.post(f"{HOME_URL}/login", data=login_data, timeout=10)
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    try:
+        resp = session.get(HOME_URL, timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        csrf = None
+        for inp in soup.find_all('input'):
+            if inp.get('name') in ['_token', 'csrf_token', 'csrfmiddlewaretoken']:
+                csrf = inp.get('value')
+                break
+        login_data = {"email": CAMPUS_EMAIL, "password": CAMPUS_PASSWORD}
+        if csrf:
+            login_data["_token"] = csrf
+        session.post(f"{HOME_URL}/login", data=login_data, timeout=10)
+    except Exception as e:
+        print(f"Login fout: {e}")
     return session
  
 @app.route("/check")
@@ -97,13 +100,13 @@ def check():
  
         resultaten.append(f"Woningen gevonden: {len(woningen)}")
  
-        # Alleen NIEUWE woningen controleren, niet alle bekende
-        te_checken = woningen - gemeld
-        resultaten.append(f"Te checken (niet al deelgenomen): {len(te_checken)}")
- 
         nieuwe = woningen - bekende
         if nieuwe:
             bekende.update(nieuwe)
+            resultaten.append(f"{len(nieuwe)} nieuwe woning(en) gevonden.")
+ 
+        te_checken = woningen - gemeld
+        resultaten.append(f"Te checken: {len(te_checken)}")
  
         for url in te_checken:
             try:
@@ -145,10 +148,10 @@ def check():
                 continue
  
         save_data(bekende, gemeld)
-        return "\n".join(resultaten) if resultaten else "Niets nieuws.", 200, {'Content-Type': 'text/plain'}
+        return "\n".join(resultaten), 200, {'Content-Type': 'text/plain'}
  
     except Exception as e:
-        send_email("⚠️ Monitor crash!", f"Check gefaald om: {str(e)}")
+        send_email("⚠️ Monitor crash!", f"Check gefaald: {str(e)}")
         return f"Error: {e}", 500
  
 @app.route("/")
@@ -157,15 +160,16 @@ def home():
  
 @app.route("/test")
 def test():
-    import requests as req
-    try:
-        r = req.get("https://www.campusgroningen.com/huren-groningen",
-                    headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-        woningen = [l["href"] for l in soup.find_all("a", href=True) if "/woning/" in l["href"]]
-        return f"Status: {r.status_code} | Woningen gevonden: {len(woningen)}", 200
-    except Exception as e:
-        return f"Fout: {e}", 500
+    send_email("Testmail Campus Monitor", "De monitor werkt nog steeds!")
+    return "Testmail verstuurd!", 200
+ 
+@app.route("/testlogin")
+def testlogin():
+    session = maak_sessie()
+    resp = session.get("https://www.campusgroningen.com/mijn-account", timeout=10)
+    if "inloggen" in resp.text.lower() or "login" in resp.url:
+        return "Login MISLUKT - niet ingelogd", 200
+    return "Login GELUKT", 200
  
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
