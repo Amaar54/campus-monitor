@@ -69,10 +69,15 @@ def maak_ingelogde_sessie():
     Logt in via curl_cffi (impersonate chrome120) en geeft een sessie terug
     die de open-huis status op woningpaginas kan zien.
     Géén automatische klik op Deelnemen, alleen voor het LEZEN van de status.
+
+    Campus Groningen gebruikt een Yii ActiveForm-widget (form id "form_79")
+    in een JS-modal. Velden gevonden via devtools:
+      FormWidget[79][ActionLogin][0][0][0][email]
+      FormWidget[79][ActionLogin][0][0][0][password]
+      full_submit[79] = 1   (geeft aan welk form op de pagina is ingestuurd)
     """
     session = curl_requests.Session(impersonate="chrome120")
 
-    # csrf token ophalen van de loginpagina
     resp = session.get(LOGIN_URL, timeout=20)
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -81,31 +86,25 @@ def maak_ingelogde_sessie():
     csrf_token = csrf_meta["content"] if csrf_meta else None
     csrf_param = csrf_param_meta["content"] if csrf_param_meta else "_csrf"
 
-    login_form = soup.find("form", attrs={"id": re.compile("login", re.I)}) or soup.find("form")
-    action_url = HOME_URL + login_form["action"] if login_form and login_form.get("action", "").startswith("/") else LOGIN_URL
-
-    email_field = None
-    password_field = None
-    if login_form:
-        for inp in login_form.find_all("input"):
-            itype = inp.get("type", "")
-            name = inp.get("name", "")
-            if itype == "email" or "email" in name.lower():
-                email_field = name
-            elif itype == "password" or "password" in name.lower():
-                password_field = name
-
-    email_field = email_field or "LoginForm[email]"
-    password_field = password_field or "LoginForm[password]"
+    # Form action: probeer het echte form-element te vinden, met fallback naar LOGIN_URL
+    login_form = soup.find("form", attrs={"id": re.compile(r"main_form_79|form_79", re.I)}) or soup.find("form")
+    action_url = LOGIN_URL
+    if login_form and login_form.get("action"):
+        a = login_form["action"]
+        action_url = HOME_URL + a if a.startswith("/") else a
 
     payload = {
-        email_field: CAMPUS_EMAIL,
-        password_field: CAMPUS_PASSWORD,
+        "FormWidget[79][ActionLogin][0][0][0][email]": CAMPUS_EMAIL,
+        "FormWidget[79][ActionLogin][0][0][0][password]": CAMPUS_PASSWORD,
+        "full_submit[79]": "1",
     }
     if csrf_token:
         payload[csrf_param] = csrf_token
 
-    session.post(action_url, data=payload, timeout=20)
+    session.post(action_url, data=payload, timeout=20, headers={
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": LOGIN_URL,
+    })
     return session
 
 
@@ -243,6 +242,58 @@ def testlogin():
     if is_ingelogd(session):
         return "Login GELUKT", 200
     return "Login MISLUKT - niet ingelogd", 200
+
+
+@app.route("/debuglogin")
+def debuglogin():
+    """Tijdelijke route om te zien wat er echt gebeurt tijdens de login-poging."""
+    session = curl_requests.Session(impersonate="chrome120")
+
+    resp_get = session.get(LOGIN_URL, timeout=20)
+    soup = BeautifulSoup(resp_get.text, "html.parser")
+
+    csrf_meta = soup.find("meta", attrs={"name": "csrf-token"})
+    csrf_param_meta = soup.find("meta", attrs={"name": "csrf-param"})
+    csrf_token = csrf_meta["content"] if csrf_meta else None
+    csrf_param = csrf_param_meta["content"] if csrf_param_meta else "_csrf"
+
+    login_form = soup.find("form", attrs={"id": re.compile(r"main_form_79|form_79", re.I)}) or soup.find("form")
+    action_url = LOGIN_URL
+    if login_form and login_form.get("action"):
+        a = login_form["action"]
+        action_url = HOME_URL + a if a.startswith("/") else a
+
+    payload = {
+        "FormWidget[79][ActionLogin][0][0][0][email]": CAMPUS_EMAIL,
+        "FormWidget[79][ActionLogin][0][0][0][password]": CAMPUS_PASSWORD,
+        "full_submit[79]": "1",
+    }
+    if csrf_token:
+        payload[csrf_param] = csrf_token
+
+    resp_post = session.post(action_url, data=payload, timeout=20, headers={
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": LOGIN_URL,
+    })
+
+    account_resp = session.get(f"{HOME_URL}/mijn-account", timeout=20)
+
+    info = (
+        f"GET login statuscode: {resp_get.status_code}\n"
+        f"Gevonden form-id: {login_form.get('id') if login_form else 'GEEN FORM GEVONDEN'}\n"
+        f"Action URL gebruikt: {action_url}\n"
+        f"CSRF param: {csrf_param}\n"
+        f"CSRF token gevonden: {'JA' if csrf_token else 'NEE'}\n"
+        f"\n--- POST login ---\n"
+        f"POST statuscode: {resp_post.status_code}\n"
+        f"POST eindURL: {resp_post.url}\n"
+        f"POST response (eerste 500 tekens):\n{resp_post.text[:500]}\n"
+        f"\n--- GET /mijn-account na login ---\n"
+        f"Statuscode: {account_resp.status_code}\n"
+        f"EindURL: {account_resp.url}\n"
+        f"Bevat 'inloggen': {'inloggen' in account_resp.text.lower()}\n"
+    )
+    return f"<pre>{info}</pre>", 200
 
 
 if __name__ == "__main__":
